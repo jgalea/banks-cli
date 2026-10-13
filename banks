@@ -64,7 +64,11 @@ def token(cfg):
     )
 
 
-def call(method, path, body=None, params=None):
+class ApiError(Exception):
+    pass
+
+
+def call(method, path, body=None, params=None, soft=False):
     cfg = config()
     url = API + path
     if params:
@@ -78,6 +82,8 @@ def call(method, path, body=None, params=None):
             return json.load(r)
     except urllib.error.HTTPError as e:
         detail = e.read().decode(errors="replace")[:500]
+        if soft:
+            raise ApiError(f"HTTP {e.code} {detail}") from None
         sys.exit(f"{method} {path} failed: HTTP {e.code} {detail}")
 
 
@@ -148,12 +154,17 @@ def cmd_link(args):
         sys.exit("State mismatch, so this URL isn't from the request just made. Nothing saved.")
     if "code" not in q:
         sys.exit(f"No code in that URL. Error from bank: {q.get('error', ['none'])[0]}")
-    session = call("POST", "/sessions", body={"code": q["code"][0]})
+    save_session(call("POST", "/sessions", body={"code": q["code"][0]}), valid_until.isoformat())
+
+
+def save_session(session, fallback_valid_until=None):
     sessions = load(SESSIONS, {})
+    aspsp = session.get("aspsp", {})
+    valid_until = session.get("access", {}).get("valid_until", fallback_valid_until)
     sessions[session["session_id"]] = {
-        "bank": aspsp["name"],
-        "country": country,
-        "valid_until": session.get("access", {}).get("valid_until", valid_until.isoformat()),
+        "bank": aspsp.get("name"),
+        "country": aspsp.get("country"),
+        "valid_until": valid_until,
         "accounts": [
             {"uid": a["uid"], "name": a.get("name") or a.get("product") or "", "currency": a.get("currency"),
              "iban": (a.get("account_id") or {}).get("iban")}
@@ -164,10 +175,17 @@ def cmd_link(args):
     if not session.get("accounts"):
         print("The bank returned no accounts. In restricted mode, link this bank under 'Link accounts' "
               "in the Enable Banking control panel first, then run this again.")
-    print(f"Linked {aspsp['name']}: {len(session.get('accounts', []))} account(s), valid until {sessions[session['session_id']]['valid_until'][:10]}.")
+    print(f"Linked {aspsp.get('name')}: {len(session.get('accounts', []))} account(s), valid until {(valid_until or '')[:10]}.")
 
 
-def wait_for_redirect(state, minutes=10):
+def cmd_finish(args):
+    q = urllib.parse.parse_qs(urllib.parse.urlparse(args.url).query)
+    if "code" not in q:
+        sys.exit(f"No code in that URL. Error from bank: {q.get('error', ['none'])[0]}")
+    save_session(call("POST", "/sessions", body={"code": q["code"][0]}))
+
+
+def wait_for_redirect(state, minutes=20):
     """Watch the clipboard for the redirect URL; fall back to a prompt off macOS."""
     if not shutil.which("pbpaste"):
         return input("Redirected URL: ").strip()
@@ -219,7 +237,13 @@ def pick_balance(balances):
 def cmd_balances(args):
     result = []
     for a in accounts(args.account):
-        res = call("GET", f"/accounts/{a['uid']}/balances")
+        try:
+            res = call("GET", f"/accounts/{a['uid']}/balances", soft=True)
+        except ApiError as e:
+            note = "bank rate limit, try again tomorrow" if "RATE_LIMIT" in str(e) else str(e)[:80]
+            result.append({"account": a["label"], "iban": a["iban"], "balances": [], "amount": None,
+                           "currency": a["currency"], "type": None, "error": note})
+            continue
         bals = res.get("balances", [])
         b = pick_balance(bals) if bals else None
         result.append({"account": a["label"], "iban": a["iban"], "balances": bals,
@@ -231,7 +255,7 @@ def cmd_balances(args):
         totals = {}
         for r in rows:
             amt = r["amount"] if r["amount"] is not None else "n/a"
-            print(f"{r['account']:<40} {amt:>14} {r['currency'] or ''}  ({r['type'] or 'no balance'})")
+            print(f"{r['account']:<40} {amt:>14} {r['currency'] or ''}  ({r.get('error') or r['type'] or 'no balance'})")
             if r["amount"] is not None:
                 totals[r["currency"]] = totals.get(r["currency"], 0) + float(r["amount"])
         if len(rows) > 1:
@@ -312,6 +336,10 @@ def main():
     s.add_argument("country")
     s.add_argument("--no-browser", action="store_true", help="print the approval URL instead of opening it")
     s.set_defaults(fn=cmd_link)
+
+    s = sub.add_parser("finish", help="complete a link from a redirect URL, e.g. after link timed out")
+    s.add_argument("url")
+    s.set_defaults(fn=cmd_finish)
 
     s = sub.add_parser("status", help="linked accounts and days until each consent expires")
     s.set_defaults(fn=cmd_status)

@@ -71,10 +71,13 @@ banks tx [filter] [--days 30]      transactions, newest first
 banks status                       linked accounts and days until consent expires
 banks banks <country> [name]       banks available in a country
 banks link <bank> <country>        approve access to a bank
+banks finish <redirect-url>        complete a link from the redirect URL if link timed out
 banks unlink <bank>                revoke a bank's consent
 ```
 
 Every command takes `--json`.
+
+Banks limit how often an app can read your data without you present, usually about four times a day per account under PSD2. If a bank hits its limit, `balances` shows it as unavailable and carries on with the rest.
 
 ## Where things are stored
 
