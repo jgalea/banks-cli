@@ -57,6 +57,8 @@ banks link Wise PT           approve access in the browser
 
 `link` opens the bank's approval page. When the bank sends you back to `https://localhost/...` the page won't load. That's expected: copy the address from the address bar and `banks` picks it up from the clipboard on macOS, or asks you to paste it elsewhere. Use `--no-browser` to print the approval URL instead of opening it.
 
+In restricted mode Enable Banking only returns accounts that are also linked in the control panel. Before running `banks link` for a bank, link it once under "Link accounts" on your application. If you skip this, `link` succeeds but reports 0 accounts.
+
 Look banks up under the country you're a customer in. Neobanks like Revolut, N26 and Wise are listed under each country they serve.
 
 Consent lasts up to 180 days for most banks. `banks status` shows how many days each one has left; link the bank again when it runs out.

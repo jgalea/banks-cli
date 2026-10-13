@@ -161,6 +161,9 @@ def cmd_link(args):
         ],
     }
     save(SESSIONS, sessions)
+    if not session.get("accounts"):
+        print("The bank returned no accounts. In restricted mode, link this bank under 'Link accounts' "
+              "in the Enable Banking control panel first, then run this again.")
     print(f"Linked {aspsp['name']}: {len(session.get('accounts', []))} account(s), valid until {sessions[session['session_id']]['valid_until'][:10]}.")
 
 
